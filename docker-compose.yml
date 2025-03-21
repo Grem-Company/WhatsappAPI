@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  whatsapp-api:
+    build:
+      context: .
+    container_name: whatsapp-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - API_TOKEN=your-secure-api-token
+      - NODE_ENV=production
+    volumes:
+      - whatsapp-auth:/app/.wwebjs_auth
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  whatsapp-auth:
+    driver: local 

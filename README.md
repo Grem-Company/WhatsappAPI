@@ -33,6 +33,34 @@ npm run dev
 
 On first launch, a QR code will be generated in the terminal that you'll need to scan with WhatsApp on your phone for authentication.
 
+## Docker Deployment
+
+### Build and run with Docker
+
+1. Build the Docker image:
+   ```
+   docker build -t whatsapp-api .
+   ```
+
+2. Run the container:
+   ```
+   docker run -p 3000:3000 -e API_TOKEN=your-secure-token --name whatsapp-api -v whatsapp-auth:/app/.wwebjs_auth whatsapp-api
+   ```
+
+### Using Docker Compose (Recommended)
+
+1. Customize the environment variables in `docker-compose.yml` if needed
+2. Start the services:
+   ```
+   docker-compose up -d
+   ```
+3. View logs to scan the QR code when first starting:
+   ```
+   docker-compose logs -f
+   ```
+
+The session data is persisted in a Docker volume, so you won't need to scan the QR code again after restarts.
+
 ## Session Persistence
 
 The API automatically maintains the WhatsApp session even after server restart:
