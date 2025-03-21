@@ -40,7 +40,6 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     ca-certificates \
     fonts-liberation \
-    libappindicator1 \
     libnss3 \
     lsb-release \
     xdg-utils \
@@ -51,8 +50,12 @@ RUN apt-get update && apt-get install -y \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Create .wwebjs_auth directory
+# Create temporary directories for puppeteer
+RUN mkdir -p /tmp/puppeteer_data && chmod -R 777 /tmp/puppeteer_data
+
+# Create .wwebjs_auth directory with proper permissions
 RUN mkdir -p /app/.wwebjs_auth && chmod -R 777 /app/.wwebjs_auth
+RUN mkdir -p /app/.wwebjs_cache && chmod -R 777 /app/.wwebjs_cache
 
 # Copy package.json and package-lock.json
 COPY package*.json ./

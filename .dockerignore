@@ -4,8 +4,5 @@ npm-debug.log
 .github
 .gitignore
 README.md
-.wwebjs_auth
-.wwebjs_cache
-.env
 Dockerfile
 .dockerignore 

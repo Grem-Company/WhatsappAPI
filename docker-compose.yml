@@ -12,10 +12,19 @@ services:
       - PORT=3000
       - API_TOKEN=${API_TOKEN}
       - NODE_ENV=production
+      - TZ=Europe/Rome
     volumes:
       - whatsapp-auth:/app/.wwebjs_auth
+      - whatsapp-cache:/app/.wwebjs_cache
+      - /tmp/puppeteer_data:/tmp/puppeteer_data
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    cap_add:
+      - SYS_ADMIN
 
 networks:
   app-network:
@@ -23,4 +32,6 @@ networks:
 
 volumes:
   whatsapp-auth:
+    driver: local
+  whatsapp-cache:
     driver: local 

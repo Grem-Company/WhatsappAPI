@@ -49,10 +49,31 @@ const authenticateToken = (req, res, next) => {
 // WhatsApp client initialization
 const client = new Client({
   puppeteer: {
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    headless: true
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-component-extensions-with-background-pages',
+      '--disable-default-apps',
+      '--mute-audio',
+      '--no-default-browser-check',
+      '--user-data-dir=/tmp/puppeteer_data'
+    ],
+    headless: true,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false
   },
-  authStrategy: new LocalAuth({ dataPath: '.wwebjs_auth' }), // Use LocalAuth to maintain the session
+  authStrategy: new LocalAuth({ 
+    dataPath: '.wwebjs_auth',
+    clientId: 'whatsapp-api-' + Math.random().toString(36).substring(2, 15)
+  }),
   qrMaxRetries: 3,
   authTimeoutMs: 0
 });
