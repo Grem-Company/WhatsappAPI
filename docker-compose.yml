@@ -10,7 +10,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - API_TOKEN=your-secure-api-token
+      - API_TOKEN=${API_TOKEN}
       - NODE_ENV=production
     volumes:
       - whatsapp-auth:/app/.wwebjs_auth
