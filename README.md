@@ -1,131 +1,131 @@
-# API WhatsApp con Autenticazione Bearer Token
+# WhatsApp API with Bearer Token Authentication
 
-Un'API RESTful per inviare messaggi WhatsApp con autenticazione tramite bearer token usando la libreria whatsapp-web.js.
+A RESTful API for sending WhatsApp messages with bearer token authentication using the whatsapp-web.js library.
 
-## Requisiti
+## Requirements
 
-- Node.js (v14 o superiore)
+- Node.js (v14 or higher)
 - NPM
 
-## Installazione
+## Installation
 
-1. Clona il repository
-2. Installa le dipendenze:
+1. Clone the repository
+2. Install dependencies:
    ```
    npm install
    ```
-3. Crea un file `.env` con le seguenti variabili:
+3. Create a `.env` file with the following variables:
    ```
    PORT=3000
-   API_TOKEN=token_di_esempio
+   API_TOKEN=your_example_token
    ```
 
-## Avvio
+## Startup
 
 ```
 npm start
 ```
 
-Per lo sviluppo con riavvio automatico:
+For development with automatic restart:
 ```
 npm run dev
 ```
 
-Al primo avvio, verrà generato un codice QR nel terminale da scansionare con WhatsApp sul tuo telefono per l'autenticazione.
+On first launch, a QR code will be generated in the terminal that you'll need to scan with WhatsApp on your phone for authentication.
 
-## Persistenza della Sessione
+## Session Persistence
 
-L'API mantiene automaticamente la sessione WhatsApp anche dopo il riavvio del server:
-- La sessione viene salvata nella cartella `.wwebjs_auth`
-- Non è necessario scansionare il codice QR ad ogni riavvio
-- Per disconnettere manualmente, è disponibile un endpoint apposito (`/api/logout`)
+The API automatically maintains the WhatsApp session even after server restart:
+- The session is saved in the `.wwebjs_auth` folder
+- You don't need to scan the QR code every time you restart the server
+- To manually disconnect, a specific endpoint is available (`/api/logout`)
 
-## Sistema Anti-Ban
+## Anti-Ban System
 
-Per evitare i ban di WhatsApp, l'API implementa un sistema di coda che limita l'invio dei messaggi:
+To avoid WhatsApp bans, the API implements a queue system that limits message sending:
 
-- Massimo un messaggio ogni 30-60 secondi (tempo di attesa casuale)
-- I messaggi vengono messi in coda e inviati automaticamente rispettando questi limiti
-- Le richieste API restituiscono informazioni sulla coda e sui tempi di attesa
+- Maximum one message every 30-60 seconds (random wait time)
+- Messages are queued and sent automatically respecting these limits
+- API responses include information about the queue and estimated wait times
 
-## Endpoints API
+## API Endpoints
 
-### Stato del Servizio
+### Service Status
 ```
 GET /api/status
 ```
-Header richiesto:
+Required header:
 ```
-Authorization: Bearer <token-da-env-file>
+Authorization: Bearer <token-from-env-file>
 ```
-Risposta: Stato del servizio incluse informazioni sulla coda e sulla connessione WhatsApp.
+Response: Service status including queue and WhatsApp connection information.
 
-### Invio Messaggio
+### Send Message
 ```
 POST /api/send
 ```
-Header richiesto:
+Required header:
 ```
-Authorization: Bearer <token-da-env-file>
+Authorization: Bearer <token-from-env-file>
 Content-Type: application/json
 ```
 Body:
 ```json
 {
   "number": "391234567890", 
-  "message": "Ciao, questo è un messaggio di prova",
-  "options": {} // Opzioni addizionali (opzionale)
+  "message": "Hi, this is a test message",
+  "options": {} // Additional options (optional)
 }
 ```
-Nota: 
-- Il numero deve essere in formato internazionale senza il '+' o altri caratteri speciali
-- Il messaggio verrà messo in coda e inviato rispettando i limiti di tempo
-- La risposta includerà informazioni sul tempo di attesa stimato
+Note: 
+- The number must be in international format without '+' or other special characters
+- The message will be queued and sent respecting the time limits
+- The response will include information about the estimated wait time
 
-### Stato della Coda
+### Queue Status
 ```
 GET /api/queue
 ```
-Header richiesto:
+Required header:
 ```
-Authorization: Bearer <token-da-env-file>
+Authorization: Bearer <token-from-env-file>
 ```
-Risposta: Informazioni sulla coda di messaggi, inclusi il numero di messaggi in attesa.
+Response: Information about the message queue, including the number of messages waiting.
 
-### Disconnessione WhatsApp
+### WhatsApp Disconnection
 ```
 POST /api/logout
 ```
-Header richiesto:
+Required header:
 ```
-Authorization: Bearer <token-da-env-file>
+Authorization: Bearer <token-from-env-file>
 ```
-Risposta: Conferma della disconnessione da WhatsApp. Sarà necessario scansionare nuovamente il QR code per riconnettersi.
+Response: Confirmation of disconnection from WhatsApp. You'll need to scan the QR code again to reconnect.
 
-## Esempi di Utilizzo con cURL
+## Usage Examples with cURL
 
-### Ottenere lo stato del servizio
+### Get Service Status
 ```
 curl -X GET http://localhost:3000/api/status \
-  -H "Authorization: Bearer <token-da-env-file>"
+  -H "Authorization: Bearer <token-from-env-file>"
 ```
 
-### Inviare un messaggio
+### Send a Message
 ```
 curl -X POST http://localhost:3000/api/send \
-  -H "Authorization: Bearer <token-da-env-file>" \
+  -H "Authorization: Bearer <token-from-env-file>" \
   -H "Content-Type: application/json" \
-  -d '{"number":"391234567890","message":"Messaggio di test"}'
+  -d '{"number":"391234567890","message":"Test message"}'
 ```
 
-### Verificare lo stato della coda
+### Check Queue Status
 ```
 curl -X GET http://localhost:3000/api/queue \
-  -H "Authorization: Bearer <token-da-env-file>"
+  -H "Authorization: Bearer <token-from-env-file>"
 ```
 
-### Disconnettere WhatsApp
+### Disconnect WhatsApp
 ```
 curl -X POST http://localhost:3000/api/logout \
-  -H "Authorization: Bearer <token-da-env-file>"
+  -H "Authorization: Bearer <token-from-env-file>"
 ``` 
