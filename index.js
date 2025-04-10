@@ -22,6 +22,7 @@ const PORT = process.env.PORT || 3000;
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
+
   
   if (!token) {
     return res.status(401).json({ error: 'Missing access token' });
@@ -223,6 +224,7 @@ app.get('/api/status', authenticateToken, (req, res) => {
 
 // Endpoint for sending messages
 app.post('/api/send', authenticateToken, async (req, res) => {
+  console.log("api send");
   try {
     const { number, message, options } = req.body;
     
@@ -245,11 +247,13 @@ app.post('/api/send', authenticateToken, async (req, res) => {
 
 // Endpoint to check queue status
 app.get('/api/queue', authenticateToken, (req, res) => {
+  console.log("api queue");
   res.json(messageQueue.getStatus());
 });
 
 // Endpoint for manual disconnection
 app.post('/api/logout', authenticateToken, async (req, res) => {
+  console.log("api logout");
   try {
     await client.logout();
     res.json({ success: true, message: 'Successfully disconnected' });
