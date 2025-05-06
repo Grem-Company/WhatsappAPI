@@ -30,31 +30,13 @@ fs.mkdirSync(puppeteerDir, { recursive: true });
 
 const app = express();
 
-// CORS configuration
-const corsOptions = {
-  origin: ['https://app.gremcompany.com', 'http://localhost:3000'],
+// Enable CORS for all routes
+app.use(cors({
+  origin: '*', // In production, change this to specific origins
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  maxAge: 86400 // 24 hours
-};
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-// Apply CORS middleware with the options
-app.use(cors(corsOptions));
-
-// Add preflight response for OPTIONS requests
-app.options('*', cors(corsOptions));
-
-// Additional headers to ensure CORS works properly
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  next();
-});
-
-// Parse JSON bodies
 app.use(express.json());
 const PORT = process.env.PORT || 3001;
 
@@ -431,8 +413,6 @@ app.get('/api/status', authenticateToken, async (req, res) => {
 });
 
 // QR Code endpoint
-app.options('/api/qrcode', cors(corsOptions)); // Handle preflight specifically for this endpoint
-
 app.get('/api/qrcode', authenticateToken, async (req, res) => {
   const format = req.query.format || 'html';
   
