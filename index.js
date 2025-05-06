@@ -1,9 +1,11 @@
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const qrcodeGenerator = require('qrcode');
 const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
+const cors = require('cors');
 
 // Load environment variables
 dotenv.config();
@@ -14,9 +16,33 @@ if (!fs.existsSync(sessionDir)) {
   fs.mkdirSync(sessionDir, { recursive: true });
 }
 
+// Make sure puppeteer temp directory exists and is clean
+const puppeteerDir = path.join('/tmp', 'puppeteer_data');
+if (fs.existsSync(puppeteerDir)) {
+  try {
+    fs.rmSync(puppeteerDir, { recursive: true, force: true });
+    console.log('Cleaned puppeteer directory');
+  } catch (err) {
+    console.log('Could not clean puppeteer directory:', err.message);
+  }
+}
+fs.mkdirSync(puppeteerDir, { recursive: true });
+
 const app = express();
+
+// Enable CORS for all routes
+app.use(cors({
+  origin: '*', // In production, change this to specific origins
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
+
+// Variable to store the latest QR code
+let latestQR = null;
+let qrGenTime = null;
 
 // Middleware for bearer token authentication
 const authenticateToken = (req, res, next) => {
@@ -47,36 +73,189 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-// WhatsApp client initialization
-const client = new Client({
-  puppeteer: {
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-      '--disable-gpu',
-      '--disable-extensions',
-      '--disable-component-extensions-with-background-pages',
-      '--disable-default-apps',
-      '--mute-audio',
-      '--no-default-browser-check',
-      '--user-data-dir=/tmp/puppeteer_data'
-    ],
-    headless: true,
-    handleSIGINT: false,
-    handleSIGTERM: false,
-    handleSIGHUP: false
-  },
-  authStrategy: new LocalAuth({ 
-    dataPath: '.wwebjs_auth',
-    clientId: 'whatsapp-api-' + Math.random().toString(36).substring(2, 15)
-  }),
-  qrMaxRetries: 3,
-  authTimeoutMs: 0
+// Function to create WhatsApp client
+function createWhatsAppClient() {
+  return new Client({
+    puppeteer: {
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu',
+        '--disable-extensions',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-default-apps',
+        '--mute-audio',
+        '--no-default-browser-check',
+        `--user-data-dir=${puppeteerDir}`
+      ],
+      headless: true,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+      ignoreHTTPSErrors: true,
+      timeout: 60000
+    },
+    authStrategy: new LocalAuth({ 
+      dataPath: '.wwebjs_auth',
+      clientId: 'whatsapp-api-' + Math.random().toString(36).substring(2, 15)
+    }),
+    qrMaxRetries: 5,
+    authTimeoutMs: 60000,
+    restartOnAuthFail: true
+  });
+}
+
+// Initialize WhatsApp client
+let client = createWhatsAppClient();
+
+// Set up client event handlers
+function setupClientEvents() {
+  // WhatsApp event handling
+  client.on('qr', (qr) => {
+    console.log('\n\n=== SCAN THIS QR CODE WITH YOUR WHATSAPP APP ===\n');
+    qrcode.generate(qr, { small: true });
+    console.log('\n=== This QR will expire after a few minutes. Scan it now! ===\n\n');
+    
+    // Save the latest QR code
+    latestQR = qr;
+    qrGenTime = new Date();
+  });
+
+  client.on('ready', () => {
+    console.log('\n🟢 WhatsApp client ready and connected!');
+    console.log('🔄 The session will be maintained even after server restart\n');
+    
+    // Clear QR code when client is ready
+    latestQR = null;
+    qrGenTime = null;
+  });
+
+  client.on('authenticated', () => {
+    console.log('✅ Authentication completed and session saved');
+  });
+
+  client.on('auth_failure', (msg) => {
+    console.error('❌ Authentication error:', msg);
+    console.log('🔄 Trying to restart the client...');
+    restartClient();
+  });
+
+  client.on('disconnected', (reason) => {
+    console.log('❌ WhatsApp client disconnected:', reason);
+    console.log('🔄 Attempting to reconnect...');
+    restartClient();
+  });
+}
+
+// Function to safely restart the client
+async function restartClient() {
+  try {
+    console.log('Cleaning up and restarting WhatsApp client...');
+    
+    // Clear existing QR code
+    latestQR = null;
+    qrGenTime = null;
+    
+    // Try to gracefully destroy the old client
+    try {
+      await client.destroy();
+    } catch (err) {
+      console.log('Error while destroying client (this is normal):', err.message);
+    }
+    
+    // Clean puppeteer directory
+    try {
+      if (fs.existsSync(puppeteerDir)) {
+        fs.rmSync(puppeteerDir, { recursive: true, force: true });
+      }
+      fs.mkdirSync(puppeteerDir, { recursive: true });
+    } catch (err) {
+      console.log('Could not clean puppeteer directory:', err.message);
+    }
+    
+    // Wait a bit for everything to clean up
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Create and initialize a new client
+    client = createWhatsAppClient();
+    setupClientEvents();
+    client.initialize();
+  } catch (error) {
+    console.error('Failed to restart client:', error);
+  }
+}
+
+// Function to verify the connection status and reconnect if needed
+async function verifyConnection() {
+  try {
+    console.log('Verifying WhatsApp connection status...');
+    
+    let needsRestart = false;
+    let state = null;
+    
+    // Check if client exists and try to get state
+    try {
+      if (client) {
+        state = await client.getState();
+        console.log('Current connection state:', state);
+      } else {
+        console.log('Client object does not exist');
+        needsRestart = true;
+      }
+    } catch (error) {
+      console.error('Error getting client state:', error.message);
+      needsRestart = true;
+    }
+    
+    // Check if we need to restart based on state
+    if (!state || state === 'DISCONNECTED') {
+      console.log('Client is disconnected or in invalid state');
+      needsRestart = true;
+    }
+    
+    // Check if we have an active session but it's disconnected
+    if (!needsRestart && !latestQR) {
+      try {
+        // Check if we have a valid session but lost connection
+        const isAuthenticated = fs.existsSync(path.join(sessionDir, 'Default', 'session'));
+        if (isAuthenticated && state !== 'CONNECTED') {
+          console.log('Session exists but not connected, trying to reconnect');
+          needsRestart = true;
+        }
+      } catch (error) {
+        console.error('Error checking session files:', error.message);
+      }
+    }
+    
+    if (needsRestart) {
+      console.log('Connection verification indicates restart needed');
+      await restartClient();
+      return false;
+    }
+    
+    return state === 'CONNECTED';
+  } catch (error) {
+    console.error('Error in verifyConnection:', error);
+    return false;
+  }
+}
+
+// Set up regular connection verification (every 5 minutes)
+setInterval(verifyConnection, 5 * 60 * 1000);
+
+// Set up client event handlers initially
+setupClientEvents();
+
+// Initialize the WhatsApp client
+client.initialize().catch(err => {
+  console.error('Error initializing client:', err);
+  console.log('Will attempt to restart...');
+  setTimeout(restartClient, 5000);
 });
 
 // Message queue system
@@ -177,49 +356,195 @@ class MessageQueue {
 // Instantiate the message queue
 const messageQueue = new MessageQueue();
 
-// WhatsApp event handling
-client.on('qr', (qr) => {
-  console.log('\n\n=== SCAN THIS QR CODE WITH YOUR WHATSAPP APP ===\n');
-  qrcode.generate(qr, { small: true });
-  console.log('\n=== This QR will expire after a few minutes. Scan it now! ===\n\n');
-});
-
-client.on('ready', () => {
-  console.log('\n🟢 WhatsApp client ready and connected!');
-  console.log('🔄 The session will be maintained even after server restart\n');
-});
-
-client.on('authenticated', () => {
-  console.log('✅ Authentication completed and session saved');
-});
-
-client.on('auth_failure', (msg) => {
-  console.error('❌ Authentication error:', msg);
-  console.log('🔄 Restart the server and scan the QR code again');
-});
-
-client.on('disconnected', (reason) => {
-  console.log('❌ WhatsApp client disconnected:', reason);
-  console.log('🔄 Attempting to reconnect...');
-  client.initialize();
-});
-
-// Initialize the WhatsApp client
-client.initialize();
-
 // Status endpoint
-app.get('/api/status', authenticateToken, (req, res) => {
-  const isConnected = client.info && client.info.wid ? true : false;
+app.get('/api/status', authenticateToken, async (req, res) => {
+  let isConnected = false;
+  let connectionInfo = null;
+  
+  try {
+    // Verifica più completa dello stato di connessione
+    if (client) {
+      // Verifica se il client è stato inizializzato correttamente
+      const state = await client.getState();
+      console.log('Current WhatsApp state:', state);
+      
+      // I possibili stati sono: CONNECTED, DISCONNECTED, CONNECTING, SYNCING, RESUMING, o null
+      isConnected = state === 'CONNECTED';
+      
+      // Raccogli informazioni sul client se disponibili
+      if (client.info && client.info.wid) {
+        connectionInfo = {
+          phone: client.info.wid.user,
+          name: client.info.pushname || 'Not available',
+          state: state
+        };
+      }
+    }
+  } catch (error) {
+    console.error('Error checking WhatsApp state:', error);
+    isConnected = false;
+  }
+  
+  // Raccogli informazioni aggiuntive sul client
+  let clientHealth = {
+    initialized: !!client,
+    hasEvents: client ? client.listenerCount('message') > 0 : false,
+    puppeteerConnected: false
+  };
+  
+  // Verifica se Puppeteer è connesso
+  try {
+    if (client && client.pupPage) {
+      clientHealth.puppeteerConnected = true;
+    }
+  } catch (error) {
+    console.error('Error checking Puppeteer connection:', error);
+  }
   
   res.json({ 
     status: 'online',
     whatsapp: isConnected ? 'connected' : 'disconnected',
-    info: isConnected ? {
-      phone: client.info.wid.user,
-      name: client.info.pushname || 'Not available'
-    } : null,
+    info: connectionInfo,
+    qrAvailable: latestQR !== null,
+    qrGeneratedAt: qrGenTime,
+    clientHealth: clientHealth,
     queue: messageQueue.getStatus()
   });
+});
+
+// QR Code endpoint
+app.get('/api/qrcode', authenticateToken, async (req, res) => {
+  const format = req.query.format || 'html';
+  
+  // Se non c'è un QR code disponibile, forzare la generazione automaticamente
+  if (!latestQR) {
+    console.log("QR code non disponibile, generazione automatica in corso...");
+    
+    try {
+      // Riavvia il client
+      await restartClient();
+      
+      // Attendi che il QR code venga generato (timeout dopo 30 secondi)
+      let timeoutCounter = 0;
+      while (!latestQR && timeoutCounter < 30) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        timeoutCounter++;
+        console.log(`Attesa QR code: ${timeoutCounter} secondi...`);
+      }
+      
+      if (!latestQR) {
+        return res.status(500).json({ 
+          error: 'Impossibile generare il QR code entro il timeout',
+          message: 'Riprova più tardi o controlla i log del server'
+        });
+      }
+    } catch (error) {
+      console.error('Errore nella generazione del QR code:', error);
+      return res.status(500).json({ 
+        error: 'Errore nella generazione del QR code',
+        message: error.message 
+      });
+    }
+  }
+  
+  try {
+    switch (format) {
+      case 'base64':
+        // Generate QR code as data URL
+        const dataUrl = await qrcodeGenerator.toDataURL(latestQR);
+        res.json({ qr: dataUrl, generatedAt: qrGenTime });
+        break;
+        
+      case 'json':
+        // Return raw QR string
+        res.json({ qr: latestQR, generatedAt: qrGenTime });
+        break;
+        
+      case 'html':
+      default:
+        // Generate HTML with QR code
+        const html = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>WhatsApp QR Code</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <style>
+                body {
+                  font-family: Arial, sans-serif;
+                  text-align: center;
+                  margin: 0;
+                  padding: 20px;
+                  background-color: #f0f2f5;
+                }
+                .container {
+                  max-width: 500px;
+                  margin: 0 auto;
+                  background-color: white;
+                  padding: 20px;
+                  border-radius: 10px;
+                  box-shadow: 0px 3px 10px rgba(0,0,0,0.1);
+                }
+                h1 {
+                  color: #128C7E;
+                }
+                .qr-container {
+                  margin: 20px auto;
+                  padding: 15px;
+                  background: white;
+                  border-radius: 5px;
+                  display: inline-block;
+                }
+                .qr-container img {
+                  max-width: 100%;
+                }
+                .info {
+                  margin-top: 20px;
+                  color: #666;
+                }
+                .expiry {
+                  color: #e53935;
+                  font-weight: bold;
+                  margin-top: 15px;
+                }
+                @media (prefers-color-scheme: dark) {
+                  body {
+                    background-color: #222;
+                    color: #eee;
+                  }
+                  .container {
+                    background-color: #333;
+                  }
+                  .qr-container {
+                    background-color: white;
+                  }
+                  .info {
+                    color: #bbb;
+                  }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1>WhatsApp Authentication</h1>
+                <div class="qr-container">
+                  <img src="${await qrcodeGenerator.toDataURL(latestQR)}" alt="WhatsApp QR Code">
+                </div>
+                <p class="info">Scan this code with your WhatsApp app to connect</p>
+                <p class="info">Generated: ${qrGenTime.toISOString()}</p>
+                <p class="expiry">This QR code will expire in a few minutes</p>
+              </div>
+            </body>
+          </html>
+        `;
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+        break;
+    }
+  } catch (error) {
+    console.error('Error generating QR code:', error);
+    res.status(500).json({ error: 'Failed to generate QR code' });
+  }
 });
 
 // Endpoint for sending messages
@@ -261,6 +586,101 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
     console.error('Error during disconnection:', error);
     res.status(500).json({ 
       error: 'Error during disconnection',
+      message: error.message 
+    });
+  }
+});
+
+// Endpoint to force connection verification
+app.post('/api/verify-connection', authenticateToken, async (req, res) => {
+  console.log("Forcing connection verification");
+  try {
+    const isConnected = await verifyConnection();
+    
+    if (isConnected) {
+      res.json({ 
+        success: true, 
+        message: 'WhatsApp is connected', 
+        state: 'CONNECTED' 
+      });
+    } else {
+      // Get current state if possible
+      let currentState = 'UNKNOWN';
+      try {
+        if (client) {
+          currentState = await client.getState() || 'UNKNOWN';
+        }
+      } catch (error) {
+        console.error('Error getting state during verification:', error);
+      }
+      
+      res.json({ 
+        success: false, 
+        message: 'WhatsApp is not connected. Restart process initiated.', 
+        state: currentState,
+        qrAvailable: latestQR !== null
+      });
+    }
+  } catch (error) {
+    console.error('Error during connection verification:', error);
+    res.status(500).json({ 
+      error: 'Error during connection verification',
+      message: error.message 
+    });
+  }
+});
+
+// Endpoint to force new QR code generation
+app.post('/api/refresh-qr', authenticateToken, async (req, res) => {
+  console.log("Forcing new QR code generation");
+  try {
+    // First try to logout if already connected
+    try {
+      if (client.info && client.info.wid) {
+        await client.logout();
+        console.log("Logged out from existing session");
+      }
+    } catch (logoutError) {
+      console.log("No active session to logout from, proceeding with restart");
+    }
+    
+    // Destroy the client and recreate it
+    console.log("Destroying and recreating WhatsApp client");
+    client.destroy();
+    
+    // Clear QR code
+    latestQR = null;
+    qrGenTime = null;
+    
+    // Wait a short time to ensure cleanup
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Initialize a new client
+    client.initialize();
+    
+    // Wait for QR code to be generated (timeout after 30 seconds)
+    let timeoutCounter = 0;
+    while (!latestQR && timeoutCounter < 30) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      timeoutCounter++;
+    }
+    
+    if (latestQR) {
+      res.json({ 
+        success: true, 
+        message: 'New QR code generated successfully',
+        qrAvailable: true
+      });
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to generate new QR code in time',
+        message: 'Please try again or check server logs'
+      });
+    }
+  } catch (error) {
+    console.error('Error refreshing QR code:', error);
+    res.status(500).json({ 
+      error: 'Error refreshing QR code',
       message: error.message 
     });
   }

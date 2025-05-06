@@ -8,12 +8,14 @@
     "dev": "nodemon index.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "whatsapp-web.js": "^1.22.1",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
-    "dotenv": "^16.3.1"
+    "whatsapp-web.js": "^1.22.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   }
-} 
+}

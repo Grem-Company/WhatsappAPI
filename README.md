@@ -88,6 +88,25 @@ Authorization: Bearer <token-from-env-file>
 ```
 Response: Service status including queue and WhatsApp connection information.
 
+### QR Code
+```
+GET /api/qrcode
+```
+Required header:
+```
+Authorization: Bearer <token-from-env-file>
+```
+Optional query parameter:
+```
+format=html|json|base64
+```
+Response: Returns the QR code in the specified format:
+- `html` (default): HTML page with a stylized QR code
+- `json`: Raw QR code string
+- `base64`: QR code as a data URL (can be used in img tags)
+
+Note: This endpoint returns 404 if WhatsApp is already connected or no QR code is available.
+
 ### Send Message
 ```
 POST /api/send
@@ -135,6 +154,12 @@ Response: Confirmation of disconnection from WhatsApp. You'll need to scan the Q
 ### Get Service Status
 ```
 curl -X GET http://localhost:3000/api/status \
+  -H "Authorization: Bearer <token-from-env-file>"
+```
+
+### Get QR Code (JSON format)
+```
+curl -X GET "http://localhost:3000/api/qrcode?format=json" \
   -H "Authorization: Bearer <token-from-env-file>"
 ```
 
