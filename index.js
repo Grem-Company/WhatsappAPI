@@ -32,7 +32,7 @@ const app = express();
 
 // Enable CORS for all routes
 app.use(cors({
-  origin: '*', // In production, change this to specific origins
+  origin: 'https://app.gremcompany.com', // In production, change this to specific origins
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
