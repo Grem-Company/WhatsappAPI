@@ -30,27 +30,44 @@ fs.mkdirSync(puppeteerDir, { recursive: true });
 
 const app = express();
 
-// CORS configuration
-const corsOptions = {
-  origin: ['https://app.gremcompany.com', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  maxAge: 86400 // 24 hours
-};
+// Lista delle origini consentite
+const allowedOrigins = ['https://app.gremcompany.com', 'http://localhost:3000'];
 
-// Apply CORS middleware with the options
-app.use(cors(corsOptions));
-
-// Add preflight response for OPTIONS requests
-app.options('*', cors(corsOptions));
-
-// Additional headers to ensure CORS works properly
+// Middleware CORS personalizzato per gestire tutte le situazioni
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  const origin = req.headers.origin;
+  
+  // Registra l'origine per debug
+  console.log(`Request from origin: ${origin}`);
+  
+  // Consenti qualsiasi origin in sviluppo o specifiche origini in produzione
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    console.log(`Access allowed for origin: ${origin}`);
+  } else {
+    console.log(`Access not allowed for origin: ${origin}`);
+    // In alternativa, potresti consentire qualsiasi origine con:
+    // res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
+  // Consenti credenziali
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  // Consenti metodi specifici
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  
+  // Consenti header specifici
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
+  // Imposta la durata della cache preflight
+  res.setHeader('Access-Control-Max-Age', '86400');
+  
+  // Gestisci le richieste OPTIONS (preflight)
+  if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS preflight request');
+    return res.status(204).end();
+  }
+  
   next();
 });
 
@@ -431,8 +448,6 @@ app.get('/api/status', authenticateToken, async (req, res) => {
 });
 
 // QR Code endpoint
-app.options('/api/qrcode', cors(corsOptions)); // Handle preflight specifically for this endpoint
-
 app.get('/api/qrcode', authenticateToken, async (req, res) => {
   const format = req.query.format || 'html';
   
