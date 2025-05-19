@@ -6,7 +6,7 @@ const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
-const fetch = require('node-fetch');
+const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
 // Load environment variables
@@ -127,11 +127,17 @@ let client = createWhatsAppClient();
 // Funzione per verificare la connessione al proxy
 async function checkProxyConnection() {
   try {
-    const response = await fetch('https://api.ipify.org?format=json', {
-      agent: new HttpsProxyAgent(`http://${proxyConfig.username}:${proxyConfig.password}@${proxyConfig.server}`)
+    const response = await axios.get('https://api.ipify.org?format=json', {
+      proxy: {
+        host: proxyConfig.server.split('://')[1].split(':')[0],
+        port: proxyConfig.server.split(':')[2],
+        auth: {
+          username: proxyConfig.username,
+          password: proxyConfig.password
+        }
+      }
     });
-    const data = await response.json();
-    console.log('Proxy IP:', data.ip);
+    console.log('Proxy IP:', response.data.ip);
     return true;
   } catch (error) {
     console.error('Errore connessione proxy:', error.message);
