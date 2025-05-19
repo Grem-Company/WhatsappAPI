@@ -6,6 +6,7 @@ const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const axios = require('axios');
 
 // Load environment variables
 dotenv.config();
@@ -96,10 +97,7 @@ function createWhatsAppClient() {
         '--mute-audio',
         '--no-default-browser-check',
         '--disk-cache-size=304857600', // Limite cache a 00MB
-        `--user-data-dir=${puppeteerDir}`,
-       
-        ...(proxyConfig ? [`--proxy-server=${proxyConfig.server}`] : [])
-        
+        `--user-data-dir=${puppeteerDir}`
       ],
       headless: true,
       handleSIGINT: false,
@@ -123,6 +121,15 @@ let client = createWhatsAppClient();
 
 // Set up client event handlers
 function setupClientEvents() {
+  // Aggiungi l'autenticazione del proxy prima di inizializzare il client
+  client.on('browser', async (browser) => {
+    const page = await browser.newPage();
+    await page.authenticate({
+      username: proxyConfig.username,
+      password: proxyConfig.password
+    });
+  });
+
   // WhatsApp event handling
   client.on('qr', (qr) => {
     console.log('\n\n=== SCAN THIS QR CODE WITH YOUR WHATSAPP APP ===\n');
@@ -690,6 +697,48 @@ app.post('/api/refresh-qr', authenticateToken, async (req, res) => {
     res.status(500).json({ 
       error: 'Error refreshing QR code',
       message: error.message 
+    });
+  }
+});
+
+// Endpoint per verificare la connessione al proxy
+app.get('/api/check-proxy', authenticateToken, async (req, res) => {
+  try {
+    const proxyUrl = proxyConfig.server;
+    const proxyHost = proxyUrl.split('://')[1].split(':')[0];
+    const proxyPort = proxyUrl.split(':')[2];
+
+    const response = await axios.get('https://api.ipify.org?format=json', {
+      proxy: {
+        protocol: 'https',
+        host: proxyHost,
+        port: proxyPort,
+        auth: {
+          username: proxyConfig.username,
+          password: proxyConfig.password
+        }
+      },
+      httpsAgent: new (require('https').Agent)({
+        rejectUnauthorized: true
+      })
+    });
+
+    res.json({
+      success: true,
+      ip: response.data.ip,
+      proxy: {
+        server: proxyUrl,
+        username: proxyConfig.username
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      proxy: {
+        server: proxyConfig.server,
+        username: proxyConfig.username
+      }
     });
   }
 });
