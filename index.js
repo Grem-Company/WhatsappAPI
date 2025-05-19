@@ -91,7 +91,7 @@ function createWhatsAppClient() {
         '--disable-default-apps',
         '--mute-audio',
         '--no-default-browser-check',
-        '--disk-cache-size=104857600', // Limite cache a 100MB
+        '--disk-cache-size=304857600', // Limite cache a 00MB
         `--user-data-dir=${puppeteerDir}`
       ],
       headless: true,
