@@ -6,18 +6,9 @@ const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
-const axios = require('axios');
-const { HttpsProxyAgent } = require('https-proxy-agent');
 
 // Load environment variables
 dotenv.config();
-
-// Proxy configuration
-const proxyConfig = process.env.PROXY_URL ? {
-  server: process.env.PROXY_URL,
-  username: process.env.PROXY_USERNAME,
-  password: process.env.PROXY_PASSWORD
-} : null;
 
 // Make sure the session directory exists
 const sessionDir = path.join(process.cwd(), '.wwebjs_auth');
@@ -48,7 +39,11 @@ app.use(cors({
 
 app.use(express.json());
 const PORT = process.env.PORT || 3001;
-
+const proxyConfig = {
+  server: process.env.PROXY_URL,
+  username: process.env.PROXY_USERNAME,
+  password: process.env.PROXY_PASSWORD
+};
 // Variable to store the latest QR code
 let latestQR = null;
 let qrGenTime = null;
@@ -100,14 +95,11 @@ function createWhatsAppClient() {
         '--disable-default-apps',
         '--mute-audio',
         '--no-default-browser-check',
-        '--disk-cache-size=304857600',
+        '--disk-cache-size=304857600', // Limite cache a 00MB
         `--user-data-dir=${puppeteerDir}`,
-        ...(proxyConfig ? [
-          `--proxy-server=${proxyConfig.server}`,
-          '--ignore-certificate-errors',
-          '--ignore-ssl-errors',
-          '--disable-web-security'
-        ] : [])
+       
+        ...(proxyConfig ? [`--proxy-server=${proxyConfig.server}`] : [])
+        
       ],
       headless: true,
       handleSIGINT: false,
@@ -129,107 +121,15 @@ function createWhatsAppClient() {
 // Initialize WhatsApp client
 let client = createWhatsAppClient();
 
-// Funzione per verificare la connessione al proxy
-async function checkProxyConnection() {
-  try {
-    const proxyUrl = new URL(proxyConfig.server);
-    const response = await axios.get('https://api.ipify.org?format=json', {
-      proxy: {
-        protocol: proxyUrl.protocol,
-        host: proxyUrl.hostname,
-        port: proxyUrl.port,
-        auth: {
-          username: proxyConfig.username,
-          password: proxyConfig.password
-        }
-      },
-      httpsAgent: new HttpsProxyAgent({
-        protocol: proxyUrl.protocol,
-        host: proxyUrl.hostname,
-        port: proxyUrl.port,
-        auth: `${proxyConfig.username}:${proxyConfig.password}`
-      }),
-      timeout: 10000,
-      validateStatus: function (status) {
-        return status >= 200 && status < 500;
-      }
-    });
-    
-    if (response.data && response.data.ip) {
-      console.log('Proxy IP:', response.data.ip);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('Errore connessione proxy:', error.message);
-    if (error.code === 'ECONNREFUSED') {
-      console.error('Proxy non raggiungibile - verifica che sia attivo e accessibile');
-    } else if (error.code === 'ETIMEDOUT') {
-      console.error('Timeout connessione proxy - verifica la velocità della connessione');
-    } else if (error.message.includes('wrong version number')) {
-      console.error('Errore SSL - prova a usare un protocollo diverso (http/https)');
-    }
-    return false;
-  }
-}
-
-// Funzione per riavviare il client con il proxy
-async function restartClientWithProxy() {
-  try {
-    console.log('Riavvio client con proxy...');
-    
-    // Verifica prima la connessione al proxy
-    const isProxyConnected = await checkProxyConnection();
-    if (!isProxyConnected) {
-      console.error('Proxy non raggiungibile, riprovo tra 30 secondi...');
-      setTimeout(restartClientWithProxy, 30000);
-      return;
-    }
-    
-    // Pulisci il QR code esistente
-    latestQR = null;
-    qrGenTime = null;
-    
-    // Distruggi il client esistente
-    try {
-      await client.destroy();
-    } catch (err) {
-      console.log('Errore durante la distruzione del client:', err.message);
-    }
-    
-    // Pulisci la directory puppeteer
-    try {
-      if (fs.existsSync(puppeteerDir)) {
-        fs.rmSync(puppeteerDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(puppeteerDir, { recursive: true });
-    } catch (err) {
-      console.log('Errore pulizia directory puppeteer:', err.message);
-    }
-    
-    // Attendi un po' per la pulizia
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    // Crea e inizializza un nuovo client
-    client = createWhatsAppClient();
-    setupClientEvents();
-    await client.initialize();
-    
-    console.log('Client riavviato con successo');
-  } catch (error) {
-    console.error('Errore durante il riavvio del client:', error);
-    // Riprova dopo 30 secondi
-    setTimeout(restartClientWithProxy, 30000);
-  }
-}
-
 // Set up client event handlers
 function setupClientEvents() {
+  // WhatsApp event handling
   client.on('qr', (qr) => {
     console.log('\n\n=== SCAN THIS QR CODE WITH YOUR WHATSAPP APP ===\n');
     qrcode.generate(qr, { small: true });
     console.log('\n=== This QR will expire after a few minutes. Scan it now! ===\n\n');
     
+    // Save the latest QR code
     latestQR = qr;
     qrGenTime = new Date();
   });
@@ -238,6 +138,7 @@ function setupClientEvents() {
     console.log('\n🟢 WhatsApp client ready and connected!');
     console.log('🔄 The session will be maintained even after server restart\n');
     
+    // Clear QR code when client is ready
     latestQR = null;
     qrGenTime = null;
   });
@@ -249,84 +150,105 @@ function setupClientEvents() {
   client.on('auth_failure', (msg) => {
     console.error('❌ Authentication error:', msg);
     console.log('🔄 Trying to restart the client...');
-    restartClientWithProxy();
+    restartClient();
   });
 
   client.on('disconnected', (reason) => {
     console.log('❌ WhatsApp client disconnected:', reason);
     console.log('🔄 Attempting to reconnect...');
-    restartClientWithProxy();
+    restartClient();
   });
+}
 
-  // Aggiungi gestione errori di rete
-  client.on('change_state', async (state) => {
-    console.log('Stato connessione cambiato:', state);
-    if (state === 'DISCONNECTED') {
-      console.log('Rilevata disconnessione, verifica proxy...');
-      const isProxyConnected = await checkProxyConnection();
-      if (!isProxyConnected) {
-        console.log('Proxy non raggiungibile, riavvio...');
-        restartClientWithProxy();
-      }
+// Function to safely restart the client
+async function restartClient() {
+  try {
+    console.log('Cleaning up and restarting WhatsApp client...');
+    
+    // Clear existing QR code
+    latestQR = null;
+    qrGenTime = null;
+    
+    // Try to gracefully destroy the old client
+    try {
+      await client.destroy();
+    } catch (err) {
+      console.log('Error while destroying client (this is normal):', err.message);
     }
-  });
+    
+    // Clean puppeteer directory
+    try {
+      if (fs.existsSync(puppeteerDir)) {
+        fs.rmSync(puppeteerDir, { recursive: true, force: true });
+      }
+      fs.mkdirSync(puppeteerDir, { recursive: true });
+    } catch (err) {
+      console.log('Could not clean puppeteer directory:', err.message);
+    }
+    
+    // Wait a bit for everything to clean up
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Create and initialize a new client
+    client = createWhatsAppClient();
+    setupClientEvents();
+    client.initialize();
+  } catch (error) {
+    console.error('Failed to restart client:', error);
+  }
 }
 
 // Function to verify the connection status and reconnect if needed
 async function verifyConnection() {
   try {
-    console.log('Verifica stato connessione WhatsApp...');
+    console.log('Verifying WhatsApp connection status...');
     
     let needsRestart = false;
     let state = null;
     
-    // Verifica prima il proxy
-    const isProxyConnected = await checkProxyConnection();
-    if (!isProxyConnected) {
-      console.log('Proxy non raggiungibile, riavvio necessario');
-      needsRestart = true;
-    }
-    
-    // Verifica stato client
+    // Check if client exists and try to get state
     try {
       if (client) {
         state = await client.getState();
-        console.log('Stato connessione attuale:', state);
+        console.log('Current connection state:', state);
       } else {
-        console.log('Client non esistente');
+        console.log('Client object does not exist');
         needsRestart = true;
       }
     } catch (error) {
-      console.error('Errore verifica stato client:', error.message);
+      console.error('Error getting client state:', error.message);
       needsRestart = true;
     }
     
+    // Check if we need to restart based on state
     if (!state || state === 'DISCONNECTED') {
-      console.log('Client disconnesso o in stato non valido');
+      console.log('Client is disconnected or in invalid state');
       needsRestart = true;
     }
     
+    // Check if we have an active session but it's disconnected
     if (!needsRestart && !latestQR) {
       try {
+        // Check if we have a valid session but lost connection
         const isAuthenticated = fs.existsSync(path.join(sessionDir, 'Default', 'session'));
         if (isAuthenticated && state !== 'CONNECTED') {
-          console.log('Sessione esistente ma non connessa, tentativo riconnessione');
+          console.log('Session exists but not connected, trying to reconnect');
           needsRestart = true;
         }
       } catch (error) {
-        console.error('Errore verifica file sessione:', error.message);
+        console.error('Error checking session files:', error.message);
       }
     }
     
     if (needsRestart) {
-      console.log('Verifica connessione indica necessità riavvio');
-      await restartClientWithProxy();
+      console.log('Connection verification indicates restart needed');
+      await restartClient();
       return false;
     }
     
     return state === 'CONNECTED';
   } catch (error) {
-    console.error('Errore in verifyConnection:', error);
+    console.error('Error in verifyConnection:', error);
     return false;
   }
 }
@@ -341,7 +263,7 @@ setupClientEvents();
 client.initialize().catch(err => {
   console.error('Error initializing client:', err);
   console.log('Will attempt to restart...');
-  setTimeout(restartClientWithProxy, 5000);
+  setTimeout(restartClient, 5000);
 });
 
 // Message queue system
@@ -508,7 +430,7 @@ app.get('/api/qrcode', authenticateToken, async (req, res) => {
     
     try {
       // Riavvia il client
-      await restartClientWithProxy();
+      await restartClient();
       
       // Attendi che il QR code venga generato (timeout dopo 30 secondi)
       let timeoutCounter = 0;
