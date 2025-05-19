@@ -100,9 +100,14 @@ function createWhatsAppClient() {
         '--disable-default-apps',
         '--mute-audio',
         '--no-default-browser-check',
-        '--disk-cache-size=304857600', // Limite cache a 300MB
+        '--disk-cache-size=304857600',
         `--user-data-dir=${puppeteerDir}`,
-        ...(proxyConfig ? [`--proxy-server=${proxyConfig.server}`] : [])
+        ...(proxyConfig ? [
+          `--proxy-server=${proxyConfig.server}`,
+          '--ignore-certificate-errors',
+          '--ignore-ssl-errors',
+          '--disable-web-security'
+        ] : [])
       ],
       headless: true,
       handleSIGINT: false,
@@ -127,20 +132,43 @@ let client = createWhatsAppClient();
 // Funzione per verificare la connessione al proxy
 async function checkProxyConnection() {
   try {
+    const proxyUrl = new URL(proxyConfig.server);
     const response = await axios.get('https://api.ipify.org?format=json', {
       proxy: {
-        host: proxyConfig.server.split('://')[1].split(':')[0],
-        port: proxyConfig.server.split(':')[2],
+        protocol: proxyUrl.protocol,
+        host: proxyUrl.hostname,
+        port: proxyUrl.port,
         auth: {
           username: proxyConfig.username,
           password: proxyConfig.password
         }
+      },
+      httpsAgent: new HttpsProxyAgent({
+        protocol: proxyUrl.protocol,
+        host: proxyUrl.hostname,
+        port: proxyUrl.port,
+        auth: `${proxyConfig.username}:${proxyConfig.password}`
+      }),
+      timeout: 10000,
+      validateStatus: function (status) {
+        return status >= 200 && status < 500;
       }
     });
-    console.log('Proxy IP:', response.data.ip);
-    return true;
+    
+    if (response.data && response.data.ip) {
+      console.log('Proxy IP:', response.data.ip);
+      return true;
+    }
+    return false;
   } catch (error) {
     console.error('Errore connessione proxy:', error.message);
+    if (error.code === 'ECONNREFUSED') {
+      console.error('Proxy non raggiungibile - verifica che sia attivo e accessibile');
+    } else if (error.code === 'ETIMEDOUT') {
+      console.error('Timeout connessione proxy - verifica la velocità della connessione');
+    } else if (error.message.includes('wrong version number')) {
+      console.error('Errore SSL - prova a usare un protocollo diverso (http/https)');
+    }
     return false;
   }
 }
