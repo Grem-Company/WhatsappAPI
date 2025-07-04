@@ -29,6 +29,51 @@ if (fs.existsSync(puppeteerDir)) {
 }
 fs.mkdirSync(puppeteerDir, { recursive: true });
 
+// Funzione per pulire i dati vecchi
+function cleanOldData() {
+  try {
+    // Pulisci la cache di Puppeteer
+    if (fs.existsSync(puppeteerDir)) {
+      const stats = fs.statSync(puppeteerDir);
+      const sizeInMB = stats.size / (1024 * 1024);
+      if (sizeInMB > 500) { // Se supera 500MB
+        fs.rmSync(puppeteerDir, { recursive: true, force: true });
+        fs.mkdirSync(puppeteerDir, { recursive: true });
+        console.log('Cleaned oversized puppeteer directory');
+      }
+    }
+
+    // Pulisci i file di sessione vecchi (mantieni solo gli ultimi 7 giorni)
+    const sessionPath = path.join(process.cwd(), '.wwebjs_auth');
+    if (fs.existsSync(sessionPath)) {
+      const files = fs.readdirSync(sessionPath, { withFileTypes: true });
+      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      
+      files.forEach(file => {
+        const filePath = path.join(sessionPath, file.name);
+        try {
+          const stats = fs.statSync(filePath);
+          if (stats.mtime.getTime() < sevenDaysAgo && file.name !== 'Default') {
+            fs.rmSync(filePath, { recursive: true, force: true });
+            console.log(`Cleaned old session file: ${file.name}`);
+          }
+        } catch (err) {
+          console.log(`Could not clean ${file.name}:`, err.message);
+        }
+      });
+    }
+
+    console.log('Data cleanup completed');
+  } catch (error) {
+    console.error('Error during data cleanup:', error);
+  }
+}
+
+// Esegui la pulizia ogni 6 ore
+setInterval(cleanOldData, 6 * 60 * 60 * 1000);
+// Esegui la pulizia all'avvio
+cleanOldData();
+
 const app = express();
 
 // Enable CORS for all routes
@@ -96,7 +141,13 @@ function createWhatsAppClient() {
         '--disable-default-apps',
         '--mute-audio',
         '--no-default-browser-check',
-        '--disk-cache-size=304857600', // Limite cache a 00MB
+        '--disk-cache-size=104857600', // Ridotto a 100MB
+        '--media-cache-size=52428800', // 50MB per media
+        '--max_old_space_size=512', // Limite memoria Node.js a 512MB
+        '--aggressive-cache-discard',
+        '--disable-background-timer-throttling',
+        '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
         `--user-data-dir=${puppeteerDir}`
       ],
       headless: true,
@@ -112,7 +163,10 @@ function createWhatsAppClient() {
     }),
     qrMaxRetries: 5,
     authTimeoutMs: 60000,
-    restartOnAuthFail: true
+    restartOnAuthFail: true,
+    // Limita il download automatico dei media
+    takeoverOnConflict: true,
+    takeoverTimeoutMs: 0
   });
 }
 
@@ -739,6 +793,76 @@ app.get('/api/check-proxy', authenticateToken, async (req, res) => {
         server: proxyConfig.server,
         username: proxyConfig.username
       }
+    });
+  }
+});
+
+// Endpoint per monitorare l'uso dello storage
+app.get('/api/storage-info', authenticateToken, (req, res) => {
+  try {
+    const getDirectorySize = (dirPath) => {
+      if (!fs.existsSync(dirPath)) return 0;
+      
+      let totalSize = 0;
+      const files = fs.readdirSync(dirPath, { withFileTypes: true });
+      
+      files.forEach(file => {
+        const filePath = path.join(dirPath, file.name);
+        if (file.isDirectory()) {
+          totalSize += getDirectorySize(filePath);
+        } else {
+          try {
+            const stats = fs.statSync(filePath);
+            totalSize += stats.size;
+          } catch (err) {
+            // Ignora errori di accesso ai file
+          }
+        }
+      });
+      
+      return totalSize;
+    };
+
+    const sessionSize = getDirectorySize(path.join(process.cwd(), '.wwebjs_auth'));
+    const puppeteerSize = getDirectorySize(puppeteerDir);
+    const totalSize = sessionSize + puppeteerSize;
+
+    res.json({
+      storage: {
+        session: {
+          size: sessionSize,
+          sizeFormatted: `${(sessionSize / (1024 * 1024)).toFixed(2)} MB`
+        },
+        puppeteer: {
+          size: puppeteerSize,
+          sizeFormatted: `${(puppeteerSize / (1024 * 1024)).toFixed(2)} MB`
+        },
+        total: {
+          size: totalSize,
+          sizeFormatted: `${(totalSize / (1024 * 1024)).toFixed(2)} MB`
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Error getting storage info',
+      message: error.message
+    });
+  }
+});
+
+// Endpoint per forzare la pulizia
+app.post('/api/clean-storage', authenticateToken, (req, res) => {
+  try {
+    cleanOldData();
+    res.json({
+      success: true,
+      message: 'Storage cleanup completed'
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Error cleaning storage',
+      message: error.message
     });
   }
 });
