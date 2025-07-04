@@ -43,9 +43,45 @@ function cleanOldData() {
       }
     }
 
-    // Pulisci i file di sessione vecchi (mantieni solo gli ultimi 7 giorni)
+    // Pulisci i file di sessione se diventano troppo grandi
     const sessionPath = path.join(process.cwd(), '.wwebjs_auth');
     if (fs.existsSync(sessionPath)) {
+      const sessionSize = getDirectorySize(sessionPath);
+      const sessionSizeMB = sessionSize / (1024 * 1024);
+      
+      console.log(`Session size: ${sessionSizeMB.toFixed(2)} MB`);
+      
+      // Se la sessione supera 200MB, pulisci i file più vecchi
+      if (sessionSizeMB > 200) {
+        console.log('Session size exceeded 200MB, cleaning old files...');
+        
+        // Pulisci i file di cache dei messaggi
+        const defaultPath = path.join(sessionPath, 'Default');
+        if (fs.existsSync(defaultPath)) {
+          const filesToClean = [
+            'IndexedDB',
+            'Local Storage',
+            'Session Storage',
+            'databases',
+            'Code Cache',
+            'GPUCache'
+          ];
+          
+          filesToClean.forEach(folder => {
+            const folderPath = path.join(defaultPath, folder);
+            if (fs.existsSync(folderPath)) {
+              try {
+                fs.rmSync(folderPath, { recursive: true, force: true });
+                console.log(`Cleaned ${folder} folder`);
+              } catch (err) {
+                console.log(`Could not clean ${folder}:`, err.message);
+              }
+            }
+          });
+        }
+      }
+      
+      // Pulisci i file di sessione vecchi (mantieni solo gli ultimi 7 giorni)
       const files = fs.readdirSync(sessionPath, { withFileTypes: true });
       const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
       
@@ -69,8 +105,54 @@ function cleanOldData() {
   }
 }
 
+// Funzione helper per calcolare la dimensione di una directory
+function getDirectorySize(dirPath) {
+  if (!fs.existsSync(dirPath)) return 0;
+  
+  let totalSize = 0;
+  const files = fs.readdirSync(dirPath, { withFileTypes: true });
+  
+  files.forEach(file => {
+    const filePath = path.join(dirPath, file.name);
+    if (file.isDirectory()) {
+      totalSize += getDirectorySize(filePath);
+    } else {
+      try {
+        const stats = fs.statSync(filePath);
+        totalSize += stats.size;
+      } catch (err) {
+        // Ignora errori di accesso ai file
+      }
+    }
+  });
+  
+  return totalSize;
+}
+
 // Esegui la pulizia ogni 6 ore
 setInterval(cleanOldData, 6 * 60 * 60 * 1000);
+
+// Pulizia più frequente solo per la sessione (ogni ora)
+setInterval(() => {
+  try {
+    const sessionPath = path.join(process.cwd(), '.wwebjs_auth');
+    if (fs.existsSync(sessionPath)) {
+      const sessionSize = getDirectorySize(sessionPath);
+      const sessionSizeMB = sessionSize / (1024 * 1024);
+      
+      console.log(`Hourly session check: ${sessionSizeMB.toFixed(2)} MB`);
+      
+      // Se supera 150MB, pulisci immediatamente
+      if (sessionSizeMB > 150) {
+        console.log('Session size exceeded 150MB, cleaning now...');
+        cleanOldData();
+      }
+    }
+  } catch (error) {
+    console.error('Error in hourly session cleanup:', error);
+  }
+}, 60 * 60 * 1000); // Ogni ora
+
 // Esegui la pulizia all'avvio
 cleanOldData();
 
@@ -148,6 +230,9 @@ function createWhatsAppClient() {
         '--disable-background-timer-throttling',
         '--disable-renderer-backgrounding',
         '--disable-backgrounding-occluded-windows',
+        '--disable-databases', // Disabilita il database locale
+        '--disable-local-storage', // Disabilita il local storage
+        '--disable-session-storage', // Disabilita il session storage
         `--user-data-dir=${puppeteerDir}`
       ],
       headless: true,
